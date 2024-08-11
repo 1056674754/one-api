@@ -17,7 +17,7 @@ import TableToolBar from 'ui-component/TableToolBar';
 import { API } from 'utils/api';
 import { ITEMS_PER_PAGE } from 'constants';
 import { IconRefresh, IconPlus } from '@tabler/icons-react';
-import EditeModal from './component/EditModal';
+import EditModal from './component/EditModal';
 
 // ----------------------------------------------------------------------
 export default function Users() {
@@ -26,6 +26,8 @@ export default function Users() {
   const [searching, setSearching] = useState(false);
   const [searchKeyword, setSearchKeyword] = useState('');
   const [openModal, setOpenModal] = useState(false);
+  const [isOnProm, setIsOnProm] = useState(false);
+
   const [editUserId, setEditUserId] = useState(0);
 
   const loadUsers = async (startIdx) => {
@@ -142,9 +144,27 @@ export default function Users() {
       <Stack direction="row" alignItems="center" justifyContent="space-between" mb={2.5}>
         <Typography variant="h4">用户</Typography>
 
-        <Button variant="contained" color="primary" startIcon={<IconPlus />} onClick={() => handleOpenModal(0)}>
-          新建用户
-        </Button>
+        <div>
+          <Button variant="contained" color="primary" startIcon={<IconPlus />} onClick={() => {
+            setIsOnProm(true);
+            handleOpenModal(0);
+          }} disabled sx={{
+            marginRight: '8px'
+            // textAlign: 'right',
+            // height: 50,
+            // display: 'flex',
+            // justifyContent: 'space-between',
+            // p: (theme) => theme.spacing(0, 1, 0, 3)
+          }}>
+            新建局端用户
+          </Button>
+          <Button variant="contained" color="primary" startIcon={<IconPlus />} onClick={() => {
+            setIsOnProm(false);
+            handleOpenModal(0);
+          }}>
+            新建租户用户
+          </Button>
+        </div>
       </Stack>
       <Card>
         <Box component="form" onSubmit={searchUsers} noValidate sx={{marginTop: 2}}>
@@ -199,7 +219,7 @@ export default function Users() {
           rowsPerPageOptions={[ITEMS_PER_PAGE]}
         />
       </Card>
-      <EditeModal open={openModal} onCancel={handleCloseModal} onOk={handleOkModal} userId={editUserId} />
+      <EditModal open={openModal} onCancel={handleCloseModal} onOk={handleOkModal} userId={editUserId} isOnProm={isOnProm}/>
     </>
   );
 }

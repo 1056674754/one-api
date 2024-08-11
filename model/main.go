@@ -25,8 +25,8 @@ func CreateRootAccountIfNeed() error {
 	var user User
 	//if user.Status != util.UserStatusEnabled {
 	if err := DB.First(&user).Error; err != nil {
-		logger.SysLog("no user exists, creating a root user for you: username is root, password is 123456")
-		hashedPassword, err := common.Password2Hash("123456")
+		logger.SysLog("no user exists, creating a root user for you: username is root, password is 666666")
+		hashedPassword, err := common.Password2Hash("666666")
 		if err != nil {
 			return err
 		}
@@ -37,13 +37,20 @@ func CreateRootAccountIfNeed() error {
 		rootUser := User{
 			Username:    "root",
 			Password:    hashedPassword,
-			Role:        RoleRootUser,
+			Role:        RoleSystemRootUser,
 			Status:      UserStatusEnabled,
 			DisplayName: "Root User",
 			AccessToken: accessToken,
 			Quota:       500000000000000,
+			TenantId:    0,
+			IsOnProm:    1,
 		}
+
 		DB.Create(&rootUser)
+
+		// Update TenantId to be equal to the user's Id
+		DB.Model(&rootUser).Update("TenantId", rootUser.Id)
+
 		if config.InitialRootToken != "" {
 			logger.SysLog("creating initial root token as requested")
 			token := Token{

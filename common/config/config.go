@@ -13,11 +13,13 @@ import (
 
 var SystemName = "One API"
 var ServerAddress = "http://localhost:3000"
+var BaseDomain = "localhost"
 var Footer = ""
 var Logo = ""
 var TopUpLink = ""
 var ChatLink = ""
-var QuotaPerUnit = 500 * 1000.0 // $0.002 / 1K tokens
+var QuotaPerUnit = 500 * 1000.0     // $0.002 / 1K tokens
+var QuotaPerUnitRMB = 7500 * 1000.0 // RMB0.03 / 1K tokens
 var DisplayInCurrencyEnabled = true
 var DisplayTokenStatEnabled = true
 
@@ -28,7 +30,7 @@ var SessionSecret = uuid.New().String()
 var OptionMap map[string]string
 var OptionMapRWMutex sync.RWMutex
 
-var ItemsPerPage = 10
+var ItemsPerPage = 20
 var MaxRecentItems = 100
 
 var PasswordLoginEnabled = true
@@ -146,7 +148,6 @@ var InitialRootToken = os.Getenv("INITIAL_ROOT_TOKEN")
 var InitialRootAccessToken = os.Getenv("INITIAL_ROOT_ACCESS_TOKEN")
 
 var GeminiVersion = env.String("GEMINI_VERSION", "v1")
-
 
 var OnlyOneLogFile = env.Bool("ONLY_ONE_LOG_FILE", false)
 

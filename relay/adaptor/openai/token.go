@@ -32,15 +32,15 @@ func InitTokenEncoders() {
 	if err != nil {
 		logger.FatalLog(fmt.Sprintf("failed to get gpt-4 token encoder: %s", err.Error()))
 	}
-	for model := range billingratio.ModelRatio {
-		if strings.HasPrefix(model, "gpt-3.5") {
-			tokenEncoderMap[model] = gpt35TokenEncoder
-		} else if strings.HasPrefix(model, "gpt-4o") {
-			tokenEncoderMap[model] = gpt4oTokenEncoder
-		} else if strings.HasPrefix(model, "gpt-4") {
-			tokenEncoderMap[model] = gpt4TokenEncoder
+	for _model := range billingratio.ModelRatio {
+		if strings.HasPrefix(_model, "gpt-3.5") {
+			tokenEncoderMap[_model] = gpt35TokenEncoder
+		} else if strings.HasPrefix(_model, "gpt-4o") {
+			tokenEncoderMap[_model] = gpt4oTokenEncoder
+		} else if strings.HasPrefix(_model, "gpt-4") {
+			tokenEncoderMap[_model] = gpt4TokenEncoder
 		} else {
-			tokenEncoderMap[model] = nil
+			tokenEncoderMap[_model] = nil
 		}
 	}
 	logger.SysLog("token encoders initialized")

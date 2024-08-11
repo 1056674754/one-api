@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	USD2RMB = 7
+	USD2RMB = 15
 	USD     = 500 // $0.002 = 1 -> $1 = 500
 	RMB     = USD / USD2RMB
 )

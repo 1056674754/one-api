@@ -30,11 +30,13 @@ func GetStatus(c *gin.Context) {
 			"wechat_qrcode":       config.WeChatAccountQRCodeImageURL,
 			"wechat_login":        config.WeChatAuthEnabled,
 			"server_address":      config.ServerAddress,
+			"base_domain":         config.BaseDomain,
 			"turnstile_check":     config.TurnstileCheckEnabled,
 			"turnstile_site_key":  config.TurnstileSiteKey,
 			"top_up_link":         config.TopUpLink,
 			"chat_link":           config.ChatLink,
 			"quota_per_unit":      config.QuotaPerUnit,
+			"quota_per_unit_rmb":  config.QuotaPerUnitRMB,
 			"display_in_currency": config.DisplayInCurrencyEnabled,
 		},
 	})

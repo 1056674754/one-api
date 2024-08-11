@@ -8,6 +8,7 @@ import (
 	"github.com/songquanpeng/one-api/common/ctxkey"
 	"github.com/songquanpeng/one-api/common/network"
 	"github.com/songquanpeng/one-api/model"
+	"log"
 	"net/http"
 	"strings"
 )
@@ -17,7 +18,42 @@ func authHelper(c *gin.Context, minRole int) {
 	username := session.Get("username")
 	role := session.Get("role")
 	id := session.Get("id")
+
+	if id == nil {
+		log.Println("id is nil")
+		//c.AbortWithStatus(http.StatusUnauthorized)
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"success": false,
+			"message": "登录态错误请重新登录",
+		})
+		c.Abort()
+		return
+	}
+
 	status := session.Get("status")
+	idInt := id.(int)
+
+	var tenantId int
+	var user *model.User // Declare user variable outside the block
+
+	//if id != nil {
+	user, _ = model.GetUserById(idInt, false)
+	if user != nil && user.Username != "" {
+		// Token is valid
+		username = user.Username
+		role = user.Role
+		id = user.Id
+		status = user.Status
+		tenantId = user.TenantId
+	} else {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无权进行此操作，session无效",
+		})
+		c.Abort()
+		return
+	}
+
 	if username == nil {
 		// Check access token
 		accessToken := c.Request.Header.Get("Authorization")
@@ -36,6 +72,7 @@ func authHelper(c *gin.Context, minRole int) {
 			role = user.Role
 			id = user.Id
 			status = user.Status
+			tenantId = user.TenantId
 		} else {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
@@ -67,24 +104,26 @@ func authHelper(c *gin.Context, minRole int) {
 	c.Set("username", username)
 	c.Set("role", role)
 	c.Set("id", id)
+	c.Set("tenantId", tenantId)
+	c.Set("loginUser", user)
 	c.Next()
 }
 
 func UserAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
-		authHelper(c, model.RoleCommonUser)
+		authHelper(c, model.RoleTenantUser)
 	}
 }
 
 func AdminAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
-		authHelper(c, model.RoleAdminUser)
+		authHelper(c, model.RoleSystemAdminUser)
 	}
 }
 
 func RootAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
-		authHelper(c, model.RoleRootUser)
+		authHelper(c, model.RoleSystemRootUser)
 	}
 }
 

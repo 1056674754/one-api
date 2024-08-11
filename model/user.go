@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/songquanpeng/one-api/common"
@@ -9,15 +10,22 @@ import (
 	"github.com/songquanpeng/one-api/common/helper"
 	"github.com/songquanpeng/one-api/common/logger"
 	"github.com/songquanpeng/one-api/common/random"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"io/ioutil"
+	"net/http"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const (
-	RoleGuestUser  = 0
-	RoleCommonUser = 1
-	RoleAdminUser  = 10
-	RoleRootUser   = 100
+	RoleGuestUser        = 0
+	RoleTenantUser       = 10
+	RoleTenantAdmin      = 80
+	RoleTenantSuperAdmin = 90
+	RoleSystemAdminUser  = 99
+	RoleSystemRootUser   = 100
 )
 
 const (
@@ -29,24 +37,87 @@ const (
 // User if you add sensitive fields, don't forget to clean them in setupLogin function.
 // Otherwise, the sensitive information will be saved on local storage in plain text!
 type User struct {
-	Id               int    `json:"id"`
-	Username         string `json:"username" gorm:"unique;index" validate:"max=12"`
-	Password         string `json:"password" gorm:"not null;" validate:"min=8,max=20"`
-	DisplayName      string `json:"display_name" gorm:"index" validate:"max=20"`
-	Role             int    `json:"role" gorm:"type:int;default:1"`   // admin, util
-	Status           int    `json:"status" gorm:"type:int;default:1"` // enabled, disabled
-	Email            string `json:"email" gorm:"index" validate:"max=50"`
-	GitHubId         string `json:"github_id" gorm:"column:github_id;index"`
-	WeChatId         string `json:"wechat_id" gorm:"column:wechat_id;index"`
-	LarkId           string `json:"lark_id" gorm:"column:lark_id;index"`
-	VerificationCode string `json:"verification_code" gorm:"-:all"`                                    // this field is only for Email verification, don't save it to database!
-	AccessToken      string `json:"access_token" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
-	Quota            int64  `json:"quota" gorm:"bigint;default:0"`
-	UsedQuota        int64  `json:"used_quota" gorm:"bigint;default:0;column:used_quota"` // used quota
-	RequestCount     int    `json:"request_count" gorm:"type:int;default:0;"`             // request number
-	Group            string `json:"group" gorm:"type:varchar(32);default:'default'"`
-	AffCode          string `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
-	InviterId        int    `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
+	IsOnProm         int       `json:"is_on_prom" gorm:"type:int;index;default:0" validate:"min=0,max=1"` // new field for saas
+	TenantId         int       `json:"tenant_id" gorm:"type:int;index"`                                   // new field for tenant
+	TenantDomain     string    `json:"tenant_domain"`                                                     // new field for tenant
+	ParentsId        int       `json:"parents_id" gorm:"type:int;index"`                                  // new field for organization
+	IsOU             int       `json:"is_ou" gorm:"type:int;index;default:0" validate:"min=0,max=1"`      // new field for organization
+	Id               int       `json:"id"`
+	Username         string    `json:"username" gorm:"unique;index" validate:"max=24"`
+	Password         string    `json:"password" gorm:"not null;" validate:"min=8,max=20"`
+	DisplayName      string    `json:"display_name" gorm:"index" validate:"max=20"`
+	Role             int       `json:"role" gorm:"type:int;default:1"`   // admin, util
+	Status           int       `json:"status" gorm:"type:int;default:1"` // enabled, disabled
+	Email            string    `json:"email" gorm:"index" validate:"max=50"`
+	GitHubId         string    `json:"github_id" gorm:"column:github_id;index"`
+	WeChatId         string    `json:"wechat_id" gorm:"column:wechat_id;index"`
+	WecomId          string    `json:"wecom_id" gorm:"column:wecom_id;index"`
+	LarkId           string    `json:"lark_id" gorm:"column:lark_id;index"`
+	VerificationCode string    `json:"verification_code" gorm:"-:all"`                                    // this field is only for Email verification, don't save it to database!
+	AccessToken      string    `json:"access_token" gorm:"type:char(32);column:access_token;uniqueIndex"` // For system management
+	Quota            int64     `json:"quota" gorm:"bigint;default:0"`
+	UsedQuota        int64     `json:"used_quota" gorm:"bigint;default:0;column:used_quota"` // used quota
+	RequestCount     int       `json:"request_count" gorm:"type:int;default:0;"`             // request number
+	AffCode          string    `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
+	InviterId        int       `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
+	Group            string    `json:"group" gorm:"type:varchar(32);default:'default'"`
+	Children         []User    `json:"children" gorm:"-"`
+	UpdatedAt        time.Time `json:"updated_at" gorm:"type:datetime;autoUpdateTime"` // 自动更新时间戳
+}
+
+type UnitDTO struct {
+	IsOnProm     int       `json:"is_on_prom"`
+	TenantId     int       `json:"tenant_id"`
+	ParentsId    int       `json:"parents_id"`
+	IsOU         int       `json:"is_ou"`
+	Id           int       `json:"id"`
+	Username     string    `json:"username"`
+	DisplayName  string    `json:"display_name"`
+	Role         int       `json:"role"`
+	Status       int       `json:"status"`
+	Email        string    `json:"email"`
+	GitHubId     string    `json:"github_id"`
+	WeChatId     string    `json:"wechat_id"`
+	WecomId      string    `json:"wecom_id"`
+	LarkId       string    `json:"lark_id"`
+	Quota        int64     `json:"quota"`
+	UsedQuota    int64     `json:"used_quota"`
+	RequestCount int       `json:"request_count"`
+	AffCode      string    `json:"aff_code"`
+	InviterId    int       `json:"inviter_id"`
+	Group        string    `json:"group"`
+	Children     []UnitDTO `json:"children"`
+}
+
+func ToUnitDTO(user *User) UnitDTO {
+	childrenDTO := make([]UnitDTO, len(user.Children))
+	for i, child := range user.Children {
+		childrenDTO[i] = ToUnitDTO(&child)
+	}
+
+	return UnitDTO{
+		IsOnProm:     user.IsOnProm,
+		TenantId:     user.TenantId,
+		ParentsId:    user.ParentsId,
+		IsOU:         user.IsOU,
+		Id:           user.Id,
+		Username:     user.Username,
+		DisplayName:  user.DisplayName,
+		Role:         user.Role,
+		Status:       user.Status,
+		Email:        user.Email,
+		GitHubId:     user.GitHubId,
+		WeChatId:     user.WeChatId,
+		WecomId:      user.WecomId,
+		LarkId:       user.LarkId,
+		Quota:        user.Quota,
+		UsedQuota:    user.UsedQuota,
+		RequestCount: user.RequestCount,
+		AffCode:      user.AffCode,
+		InviterId:    user.InviterId,
+		Group:        user.Group,
+		Children:     childrenDTO,
+	}
 }
 
 func GetMaxUserId() int {
@@ -55,8 +126,37 @@ func GetMaxUserId() int {
 	return user.Id
 }
 
-func GetAllUsers(startIdx int, num int, order string) (users []*User, err error) {
-	query := DB.Limit(num).Offset(startIdx).Omit("password").Where("status != ?", UserStatusDeleted)
+func GetAllUsers(loginUser *User, startIdx int, num int, order string, rootUserOnly bool) (users []*User, totalCount int64, totalPage int, err error) {
+	if loginUser == nil {
+		return nil, 0, 0, errors.New("loginUser is nil")
+	}
+
+	baseQuery := DB.Model(&User{}).Omit("password").Where(
+		"status != ?", UserStatusDeleted)
+
+	if rootUserOnly {
+		baseQuery = baseQuery.Where("tenant_id = id")
+	}
+
+	if loginUser.IsOnProm != 1 {
+		baseQuery = baseQuery.Where("tenant_id = ?", loginUser.TenantId)
+	}
+
+	// 计算总记录数
+	err = baseQuery.Count(&totalCount).Error
+	if err != nil {
+		return nil, 0, 0, err
+	}
+
+	// 计算总页数
+	if num > 0 {
+		totalPage = int((totalCount + int64(num) - 1) / int64(num))
+	} else {
+		totalPage = 0
+	}
+
+	// 分页查询
+	query := baseQuery.Limit(num).Offset(startIdx)
 
 	switch order {
 	case "quota":
@@ -70,14 +170,16 @@ func GetAllUsers(startIdx int, num int, order string) (users []*User, err error)
 	}
 
 	err = query.Find(&users).Error
-	return users, err
+	return users, totalCount, totalPage, err
 }
 
 func SearchUsers(keyword string) (users []*User, err error) {
 	if !common.UsingPostgreSQL {
-		err = DB.Omit("password").Where("id = ? or username LIKE ? or email LIKE ? or display_name LIKE ?", keyword, keyword+"%", keyword+"%", keyword+"%").Find(&users).Error
+		err = DB.Omit("password").Where(
+			"id = ? or username LIKE ? or email LIKE ? or display_name LIKE ?", keyword, keyword+"%", keyword+"%", keyword+"%").Find(&users).Error
 	} else {
-		err = DB.Omit("password").Where("username LIKE ? or email LIKE ? or display_name LIKE ?", keyword+"%", keyword+"%", keyword+"%").Find(&users).Error
+		err = DB.Omit("password").Where(
+			"username LIKE ? or email LIKE ? or display_name LIKE ?", keyword+"%", keyword+"%", keyword+"%").Find(&users).Error
 	}
 	return users, err
 }
@@ -92,6 +194,34 @@ func GetUserById(id int, selectAll bool) (*User, error) {
 		err = DB.First(&user, "id = ?", id).Error
 	} else {
 		err = DB.Omit("password").First(&user, "id = ?", id).Error
+	}
+	return &user, err
+}
+
+func GetTenantUserById(tenantId int, id int, selectAll bool) (*User, error) {
+	if id == 0 {
+		return nil, errors.New("id 为空！")
+	}
+	user := User{Id: id}
+	var err error = nil
+	if selectAll {
+		err = DB.First(&user, "id = ? AND tenant_id = ? AND is_ou = 0 AND is_on_prom = 0", id, tenantId).Error
+	} else {
+		err = DB.Omit("password").First(&user, "id = ? AND tenant_id = ? AND is_ou = 0 AND is_on_prom = 0", id, tenantId).Error
+	}
+	return &user, err
+}
+
+func GetTenantDeptById(tenantId int, id int, selectAll bool) (*User, error) {
+	if id == 0 {
+		return nil, errors.New("id 为空！")
+	}
+	user := User{Id: id}
+	var err error = nil
+	if selectAll {
+		err = DB.First(&user, "id = ? AND tenant_id = ? AND is_ou = 1 AND is_on_prom = 0", id, tenantId).Error
+	} else {
+		err = DB.Omit("password").First(&user, "id = ? AND tenant_id = ? AND is_ou = 1 AND is_on_prom = 0", id, tenantId).Error
 	}
 	return &user, err
 }
@@ -124,10 +254,41 @@ func (user *User) Insert(inviterId int) error {
 	user.Quota = config.QuotaForNewUser
 	user.AccessToken = random.GetUUID()
 	user.AffCode = random.GetRandomString(4)
-	result := DB.Create(user)
+
+	// 开始事务
+	tx := DB.Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+
+	// 尝试创建用户
+	result := tx.Create(user)
 	if result.Error != nil {
+		// 如果创建失败，回滚事务
+		tx.Rollback()
 		return result.Error
 	}
+
+	//result := DB.Create(user)
+	//if result.Error != nil {
+	//	return result.Error
+	//}
+
+	//DB.Model(&user).Update("TenantId", user.Id)
+
+	// 更新 TenantId
+	if user.TenantId == 0 && user.IsOnProm == 0 {
+		if result := tx.Model(user).Update("TenantId", user.Id); result.Error != nil {
+			// 如果更新失败，回滚事务
+			tx.Rollback()
+			return result.Error
+		}
+	}
+	// 提交事务
+	if result := tx.Commit(); result.Error != nil {
+		return result.Error
+	}
+
 	if config.QuotaForNewUser > 0 {
 		RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("新用户注册赠送 %s", common.LogQuota(config.QuotaForNewUser)))
 	}
@@ -197,15 +358,31 @@ func (user *User) ValidateAndFill() (err error) {
 	if user.Username == "" || password == "" {
 		return errors.New("用户名或密码为空")
 	}
-	err = DB.Where("username = ?", user.Username).First(user).Error
+
+	// Build the query based on TenantId
+	var query *gorm.DB
+	if user.TenantId > 0 {
+		query = DB.Where("username = ? AND tenant_id = ?", user.Username, user.TenantId)
+	} else {
+		query = DB.Where("username = ? AND (tenant_id = 0 OR id = tenant_id)", user.Username)
+	}
+
+	err = query.First(user).Error
 	if err != nil {
 		// we must make sure check username firstly
 		// consider this case: a malicious user set his username as other's email
-		err := DB.Where("email = ?", user.Username).First(user).Error
+		if user.TenantId > 0 {
+			query = DB.Where("email = ? AND tenant_id = ?", user.Username, user.TenantId)
+		} else {
+			query = DB.Where("email = ? AND (tenant_id = 0 OR id = tenant_id)", user.Username)
+		}
+
+		err := query.First(user).Error
 		if err != nil {
 			return errors.New("用户名或密码错误，或用户已被封禁")
 		}
 	}
+
 	okay := common.ValidatePasswordAndHash(password, user.Password)
 	if !okay || user.Status != UserStatusEnabled {
 		return errors.New("用户名或密码错误，或用户已被封禁")
@@ -303,7 +480,7 @@ func IsAdmin(userId int) bool {
 		logger.SysError("no such user " + err.Error())
 		return false
 	}
-	return user.Role >= RoleAdminUser
+	return user.Role >= RoleSystemAdminUser
 }
 
 func IsUserEnabled(userId int) (bool, error) {
@@ -388,7 +565,7 @@ func decreaseUserQuota(id int, quota int64) (err error) {
 }
 
 func GetRootUserEmail() (email string) {
-	DB.Model(&User{}).Where("role = ?", RoleRootUser).Select("email").Find(&email)
+	DB.Model(&User{}).Where("role = ?", RoleSystemRootUser).Select("email").Find(&email)
 	return email
 }
 
@@ -434,4 +611,221 @@ func updateUserRequestCount(id int, count int) {
 func GetUsernameById(id int) (username string) {
 	DB.Model(&User{}).Where("id = ?", id).Select("username").Find(&username)
 	return username
+}
+
+func BuildTree(units []UnitDTO, parentsId int) []UnitDTO {
+	var tree []UnitDTO
+	for _, unit := range units {
+		if unit.ParentsId == parentsId {
+			children := BuildTree(units, unit.Id)
+
+			unit.Children = children
+			tree = append(tree, unit)
+			//tree = append(tree, children...)
+		}
+	}
+	return tree
+
+	//var children []User
+	//if err := DB.Where("parents_id = ?", user.Id).Find(&children).Error; err != nil {
+	//	return err
+	//}
+
+	//for i := range children {
+	//	if children[i].IsOU == 1 {
+	//		if err := FetchChildren(&children[i]); err != nil {
+	//			return err
+	//		}
+	//	}
+	//}
+	//
+	//user.Children = children
+	//return nil
+
+}
+
+func FetchWeComEmployees(accessToken string) ([]User, error) {
+	url := fmt.Sprintf("https://qyapi.weixin.qq.com/cgi-bin/user/list?access_token=%s&department_id=1&fetch_child=1", accessToken)
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		ErrCode  int    `json:"errcode"`
+		ErrMsg   string `json:"errmsg"`
+		UserList []struct {
+			UserId     string `json:"userid"`
+			Name       string `json:"name"`
+			Department []int  `json:"department"`
+			Email      string `json:"email"`
+		} `json:"userlist"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	if result.ErrCode != 0 {
+		return nil, fmt.Errorf("WeCom API error: %s", result.ErrMsg)
+	}
+
+	var users []User
+	for _, u := range result.UserList {
+		user := User{
+			Username:    u.UserId,
+			DisplayName: u.Name,
+			Email:       u.Email,
+			TenantId:    1, // Example TenantId, adjust as needed
+			ParentsId:   u.Department[0],
+			IsOU:        0,
+		}
+		users = append(users, user)
+	}
+
+	return users, nil
+}
+
+func saveUsersToDB(users []User) error {
+	db, err := gorm.Open(sqlite.Open("test.db"), &gorm.Config{})
+	if err != nil {
+		return err
+	}
+
+	if err := db.AutoMigrate(&User{}); err != nil {
+		return err
+	}
+
+	for _, user := range users {
+		if err := db.Create(&user).Error; err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func GetWecomInfo(topUser User) (string, string, string, int, error) {
+	input := topUser.WecomId
+	// 使用 strings.Split 函数按分号分割字符串
+	parts := strings.Split(input, ";")
+
+	// 检查分割后的部分数量是否足够
+	if len(parts) < 4 {
+		return "", "", "", 0, errors.New("input string does not contain enough parts")
+	}
+
+	// 尝试将 parts[3] 转换为 int
+	integerPart, err := strconv.Atoi(parts[3])
+	if err != nil {
+		return "", "", "", 0, errors.New("parts[3] is not a valid integer")
+	}
+
+	// 返回分割后的值
+	return parts[0], parts[1], parts[2], integerPart, nil
+}
+
+// UpdateCorpIdAndSecret 更新 corpId 和 corpSecret
+func (user *User) UpdateCorpIdAndSecret(newCorpId, newCorpSecret string) error {
+	parts := strings.Split(user.WecomId, ";")
+	if len(parts) != 4 {
+		fmt.Println("Invalid WecomId format")
+		//return
+		parts = strings.Split(";;;", ";")
+	}
+	parts[0] = newCorpId
+	parts[1] = newCorpSecret
+	user.WecomId = strings.Join(parts, ";")
+
+	err := DB.Model(user).Updates(user).Error
+	return err
+}
+
+// UpdateAccessToken 更新 accessToken
+func (user *User) UpdateAccessToken(newAccessToken string, expire_at int64) error {
+	parts := strings.Split(user.WecomId, ";")
+	if len(parts) != 4 {
+		fmt.Println("Invalid WecomId format")
+		parts = strings.Split(";;;", ";")
+	}
+	parts[2] = newAccessToken
+	parts[3] = strconv.FormatInt(expire_at, 10)
+	user.WecomId = strings.Join(parts, ";")
+
+	err := DB.Model(user).Updates(user).Error
+	return err
+}
+
+type AccessTokenResponse struct {
+	AccessToken string `json:"access_token"`
+	ExpiresIn   int    `json:"expires_in"`
+	ErrCode     int    `json:"errcode"`
+	ErrMsg      string `json:"errmsg"`
+}
+
+func GetAccessToken(corpID, corpSecret string) (string, int64, error) {
+	url := fmt.Sprintf("https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=%s&corpsecret=%s", corpID, corpSecret)
+
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", 0, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	var tokenResponse AccessTokenResponse
+	err = json.Unmarshal(body, &tokenResponse)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to unmarshal response: %w", err)
+	}
+
+	if tokenResponse.ErrCode != 0 {
+		return "", 0, fmt.Errorf("error from API: %d - %s", tokenResponse.ErrCode, tokenResponse.ErrMsg)
+	}
+
+	// 计算过期时间的时间戳
+	expireTimestamp := time.Now().Unix() + int64(tokenResponse.ExpiresIn)
+
+	return tokenResponse.AccessToken, expireTimestamp, nil
+}
+
+func GetDeptWithChildren(dept *User) (*UnitDTO, error) {
+	//var dept User
+	//if err := DB.Where("id = ? AND is_ou = 1", id).First(&dept).Error; err != nil {
+	//	return nil, err
+	//}
+
+	if err := FetchChildren(dept); err != nil {
+		return nil, err
+	}
+
+	deptDTO := ToUnitDTO(dept)
+	return &deptDTO, nil
+}
+
+func FetchChildren(user *User) error {
+	var children []User
+	if err := DB.Where("parents_id = ?", user.Id).Find(&children).Error; err != nil {
+		return err
+	}
+
+	for i := range children {
+		if children[i].IsOU == 1 {
+			if err := FetchChildren(&children[i]); err != nil {
+				return err
+			}
+		}
+	}
+
+	user.Children = children
+	return nil
 }

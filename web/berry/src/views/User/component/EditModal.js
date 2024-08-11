@@ -56,7 +56,7 @@ const originInputs = {
   quota: 0
 };
 
-const EditModal = ({ open, userId, onCancel, onOk }) => {
+const EditModal = ({ open, userId, isOnProm, onCancel, onOk }) => {
   const theme = useTheme();
   const [inputs, setInputs] = useState(originInputs);
   const [groupOptions, setGroupOptions] = useState([]);
@@ -67,9 +67,9 @@ const EditModal = ({ open, userId, onCancel, onOk }) => {
 
     let res;
     if (values.is_edit) {
-      res = await API.put(`/api/user/`, { ...values, id: parseInt(userId) });
+      res = await API.put(`/api/user/`, { ...values, id: parseInt(userId), isOnProm });
     } else {
-      res = await API.post(`/api/user/`, values);
+      res = await API.post(`/api/user/`, { ...values, isOnProm });
     }
     const { success, message } = res.data;
     if (success) {
@@ -127,7 +127,7 @@ const EditModal = ({ open, userId, onCancel, onOk }) => {
   return (
     <Dialog open={open} onClose={onCancel} fullWidth maxWidth={'md'}>
       <DialogTitle sx={{ margin: '0px', fontWeight: 700, lineHeight: '1.55556', padding: '24px', fontSize: '1.125rem' }}>
-        {userId ? '编辑用户' : '新建用户'}
+        {userId ? (isOnProm ? '编辑局端用户': '编辑租户用户') : (isOnProm ? '新建局端用户' : '新建租户用户')}
       </DialogTitle>
       <Divider />
       <DialogContent>

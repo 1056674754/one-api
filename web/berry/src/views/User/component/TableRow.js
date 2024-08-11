@@ -25,12 +25,18 @@ import { useTheme } from '@mui/material/styles';
 
 function renderRole(role) {
   switch (role) {
-    case 1:
-      return <Label color="default">普通用户</Label>;
+    case 0:
+      return <Label color="default">访客用户</Label>;
     case 10:
-      return <Label color="orange">管理员</Label>;
+      return <Label color="orange">租户用户</Label>;
+    case 80:
+      return <Label color="orange">租户管理员</Label>;
+    case 90:
+      return <Label color="orange">租户超级管理员</Label>;
+    case 99:
+      return <Label color="success">系统管理员</Label>;
     case 100:
-      return <Label color="success">超级管理员</Label>;
+      return <Label color="success">系统根用户</Label>;
     default:
       return <Label color="error">未知身份</Label>;
   }
@@ -145,11 +151,11 @@ export default function UsersTableRow({ item, manageUser, handleOpenModal, setMo
           <MenuItem
             onClick={() => {
               handleCloseMenu();
-              manageUser(item.username, 'role', item.role === 1 ? true : false);
+              manageUser(item.username, 'role', item.role === 1);
             }}
           >
             <IconUser style={{ marginRight: '16px' }} />
-            {item.role === 1 ? '设为管理员' : '取消管理员'}
+            {item.role !== 100 && item.role !== 90 ? '设为管理员' : '取消管理员'}
           </MenuItem>
         )}
 

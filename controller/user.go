@@ -2,14 +2,19 @@ package controller
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/songquanpeng/one-api/common"
 	"github.com/songquanpeng/one-api/common/config"
 	"github.com/songquanpeng/one-api/common/ctxkey"
 	"github.com/songquanpeng/one-api/common/random"
 	"github.com/songquanpeng/one-api/model"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-contrib/sessions"
@@ -19,6 +24,7 @@ import (
 type LoginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+	//TenantId int    `json:"tenantId"`
 }
 
 func Login(c *gin.Context) {
@@ -40,16 +46,20 @@ func Login(c *gin.Context) {
 	}
 	username := loginRequest.Username
 	password := loginRequest.Password
+	//tenantId := loginRequest.TenantId
+
 	if username == "" || password == "" {
 		c.JSON(http.StatusOK, gin.H{
-			"message": "无效的参数",
+			"message": "无效的账号密码",
 			"success": false,
 		})
 		return
 	}
+
 	user := model.User{
 		Username: username,
 		Password: password,
+		//TenantId: tenantId,
 	}
 	err = user.ValidateAndFill()
 	if err != nil {
@@ -60,6 +70,146 @@ func Login(c *gin.Context) {
 		return
 	}
 	SetupLogin(&user, c)
+}
+
+type TenantLoginRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+	TenantId int    `json:"tenantId"`
+}
+
+func TenantUserLogin(c *gin.Context) {
+	if !config.PasswordLoginEnabled {
+		c.JSON(http.StatusOK, gin.H{
+			"message": "管理员关闭了密码登录",
+			"success": false,
+		})
+		return
+	}
+	var loginRequest TenantLoginRequest
+	err := json.NewDecoder(c.Request.Body).Decode(&loginRequest)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"message": "无效的参数",
+			"success": false,
+		})
+		return
+	}
+	username := loginRequest.Username
+	password := loginRequest.Password
+	tenantId := loginRequest.TenantId
+
+	if username == "" || password == "" {
+		c.JSON(http.StatusOK, gin.H{
+			"message": "无效的账号密码",
+			"success": false,
+		})
+		return
+	}
+
+	user := model.User{
+		Username: username,
+		Password: password,
+		TenantId: tenantId,
+	}
+	err = user.ValidateAndFill()
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"message": err.Error(),
+			"success": false,
+		})
+		return
+	}
+	SetupLogin(&user, c)
+}
+
+type TenantGetRequest struct {
+	Domain     *string `json:"domain,omitempty"`
+	TenantName *string `json:"tenantName,omitempty"`
+}
+
+func TenantGet(c *gin.Context) {
+	//if !config.PasswordLoginEnabled {
+	//	c.JSON(http.StatusOK, gin.H{
+	//		"message": "管理员关闭了密码登录",
+	//		"success": false,
+	//	})
+	//	return
+	//}
+
+	//var tenantGetRequest TenantGetRequest
+	//err := json.NewDecoder(c.Request.Body).Decode(&tenantGetRequest)
+	//if err != nil {
+	//	c.JSON(http.StatusOK, gin.H{
+	//		"message": "无效的参数",
+	//		"success": false,
+	//	})
+	//	return
+	//}
+
+	//domain := *tenantGetRequest.Domain
+	//tenantName := *tenantGetRequest.TenantName
+	//password := tenantGetRequest.Password
+	//tenantId := tenantGetRequest.TenantId
+
+	//if domain != "" && tenantName != "" {
+	//	c.JSON(http.StatusOK, gin.H{
+	//		"message": "无效的参数",
+	//		"success": false,
+	//	})
+	//	return
+	//}
+	//
+	//user := model.User{
+	//	Username: username,
+	//	Password: password,
+	//	TenantId: tenantId,
+	//}
+	//err = user.ValidateAndFill()
+	//if err != nil {
+	//	c.JSON(http.StatusOK, gin.H{
+	//		"message": err.Error(),
+	//		"success": false,
+	//	})
+	//	return
+	//}
+
+	var request TenantGetRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var user model.User
+	query := model.DB.Model(&model.User{}).Where("is_on_prom = ?", false)
+
+	if request.Domain != nil {
+		query = query.Where("tenant_domain = ?", *request.Domain).Where("id = tenant_id")
+	}
+
+	if request.TenantName != nil {
+		query = query.Where("username = ?", *request.TenantName).Where("id = tenant_id")
+	}
+
+	if err := query.First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "tenant not found"})
+		} else {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+		}
+		return
+	}
+
+	// Return only the necessary fields
+	cleanUser := map[string]interface{}{
+		"id":            user.Id,
+		"tenant_id":     user.TenantId,
+		"tenant_domain": user.TenantDomain,
+		"display_name":  user.DisplayName,
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": cleanUser})
+
 }
 
 // setup session & cookies and then return user info
@@ -83,6 +233,8 @@ func SetupLogin(user *model.User, c *gin.Context) {
 		DisplayName: user.DisplayName,
 		Role:        user.Role,
 		Status:      user.Status,
+		TenantId:    user.TenantId,
+		IsOnProm:    user.IsOnProm,
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"message": "",
@@ -182,13 +334,32 @@ func Register(c *gin.Context) {
 }
 
 func GetAllUsers(c *gin.Context) {
+	loginUser, exists := c.Get("loginUser")
+	if !exists {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "此接口必须登录"})
+		return
+	}
+	// 将 loginUser 转换为你需要的类型
+	loginUserObj := loginUser.(*model.User)
+
 	p, _ := strconv.Atoi(c.Query("p"))
-	if p < 0 {
-		p = 0
+	if p < 1 {
+		p = 1
+	}
+
+	pageSizeStr := c.Query("pageSize")
+	pageSize, psErr := strconv.Atoi(pageSizeStr)
+	if psErr != nil {
+		log.Printf("Invalid pageSize: %s, using default 10", pageSizeStr)
+		pageSize = 10
+	}
+	if pageSize <= 0 {
+		pageSize = 10
 	}
 
 	order := c.DefaultQuery("order", "")
-	users, err := model.GetAllUsers(p*config.ItemsPerPage, config.ItemsPerPage, order)
+
+	users, total, totalPage, err := model.GetAllUsers(loginUserObj, (p-1)*pageSize, pageSize, order, loginUserObj.IsOnProm == 1)
 
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
@@ -199,9 +370,13 @@ func GetAllUsers(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    users,
+		"success":   true,
+		"message":   "",
+		"data":      users,
+		"total":     total,
+		"totalPage": totalPage,
+		"pageSize":  pageSize,
+		"page":      p,
 	})
 }
 
@@ -241,7 +416,7 @@ func GetUser(c *gin.Context) {
 		return
 	}
 	myRole := c.GetInt(ctxkey.Role)
-	if myRole <= user.Role && myRole != model.RoleRootUser {
+	if myRole <= user.Role && myRole != model.RoleSystemRootUser {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": "无权获取同级或更高等级用户的信息",
@@ -390,14 +565,14 @@ func UpdateUser(c *gin.Context) {
 		return
 	}
 	myRole := c.GetInt(ctxkey.Role)
-	if myRole <= originUser.Role && myRole != model.RoleRootUser {
+	if myRole <= originUser.Role && myRole != model.RoleSystemRootUser {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": "无权更新同权限等级或更高权限等级的用户信息",
 		})
 		return
 	}
-	if myRole <= updatedUser.Role && myRole != model.RoleRootUser {
+	if myRole <= updatedUser.Role && myRole != model.RoleSystemRootUser {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": "无权将其他用户权限等级提升到大于等于自己的权限等级",
@@ -511,7 +686,7 @@ func DeleteSelf(c *gin.Context) {
 	id := c.GetInt("id")
 	user, _ := model.GetUserById(id, false)
 
-	if user.Role == model.RoleRootUser {
+	if user.Role == model.RoleSystemRootUser {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": "不能删除超级管理员账户",
@@ -535,6 +710,15 @@ func DeleteSelf(c *gin.Context) {
 }
 
 func CreateUser(c *gin.Context) {
+	loginUser, exists := c.Get("loginUser")
+	if !exists {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "此接口必须登录"})
+		return
+	}
+
+	// 将 loginUser 转换为你需要的类型
+	loginUserObj := loginUser.(*model.User)
+
 	var user model.User
 	err := json.NewDecoder(c.Request.Body).Decode(&user)
 	if err != nil || user.Username == "" || user.Password == "" {
@@ -551,6 +735,7 @@ func CreateUser(c *gin.Context) {
 		})
 		return
 	}
+
 	if user.DisplayName == "" {
 		user.DisplayName = user.Username
 	}
@@ -562,17 +747,199 @@ func CreateUser(c *gin.Context) {
 		})
 		return
 	}
-	// Even for admin users, we cannot fully trust them!
+
 	cleanUser := model.User{
 		Username:    user.Username,
 		Password:    user.Password,
 		DisplayName: user.DisplayName,
+		TenantId:    -1,
+		Role:        model.RoleTenantUser,
 	}
+
+	if loginUserObj.Role == model.RoleSystemRootUser || loginUserObj.Role == model.RoleSystemAdminUser {
+		// Even for admin users, we cannot fully trust them!
+		// TODO 区分加的是RoleSystemAdminUser还是租户管理员, 暂时不能添加局端用户
+		cleanUser.Role = model.RoleTenantSuperAdmin
+		cleanUser.IsOU = 1
+	} else {
+		cleanUser.TenantId = loginUserObj.TenantId
+	}
+
 	if err := cleanUser.Insert(0); err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": err.Error(),
 		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+	})
+	return
+}
+
+func CreateTenantUser(c *gin.Context) {
+	loginUser, exists := c.Get("loginUser")
+
+	if !exists {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "此接口必须登录"})
+		return
+	}
+
+	// 将 loginUser 转换为你需要的类型
+	loginUserObj := loginUser.(*model.User)
+
+	var user model.User
+	err := json.NewDecoder(c.Request.Body).Decode(&user)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无效的参数",
+		})
+		return
+	}
+
+	if user.Username == "" || user.Password == "" {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "请检查账号密码",
+		})
+		return
+	}
+
+	if err := common.Validate.Struct(&user); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "输入不合法 " + err.Error(),
+		})
+		return
+	}
+
+	if user.DisplayName == "" {
+		user.DisplayName = user.Username
+	}
+	myRole := c.GetInt("role")
+	if user.Role >= myRole {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无法创建权限大于等于自己的用户",
+		})
+		return
+	}
+
+	cleanUser := model.User{
+		Username:    user.Username,
+		Password:    user.Password,
+		DisplayName: user.DisplayName,
+		ParentsId:   user.ParentsId,
+		TenantId:    loginUserObj.TenantId,
+		Role:        model.RoleTenantUser,
+	}
+
+	if err := cleanUser.Insert(0); err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed: users.username") {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "此账户已注册",
+			})
+		} else {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+	})
+	return
+}
+
+func CreateDept(c *gin.Context) {
+	loginUser, exists := c.Get("loginUser")
+
+	if !exists {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "此接口必须登录"})
+		return
+	}
+
+	// 将 loginUser 转换为你需要的类型
+	loginUserObj := loginUser.(*model.User)
+
+	fmt.Print("TenantId: ", loginUserObj.TenantId, "\n")
+	if loginUserObj.Role < model.RoleTenantAdmin {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "您无权创建子部门",
+		})
+		return
+	}
+
+	var dept model.User
+	err := json.NewDecoder(c.Request.Body).Decode(&dept)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无效的参数",
+		})
+		return
+	}
+
+	if dept.DisplayName == "" {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "请检查, 必须输入部门显示名称",
+		})
+		return
+	}
+
+	if err := common.Validate.Struct(&dept); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "输入不合法 " + err.Error(),
+		})
+		return
+	}
+
+	if dept.Username == "" {
+		dept.Username = "T_" + strconv.Itoa(loginUserObj.TenantId) + "_" + dept.DisplayName
+	}
+	//myRole := c.GetInt("role")
+	//if user.Role >= myRole {
+	//	c.JSON(http.StatusOK, gin.H{
+	//		"success": false,
+	//		"message": "无法创建权限大于等于自己的用户",
+	//	})
+	//	return
+	//}
+
+	cleanUser := model.User{
+		Username:    dept.Username,
+		Password:    dept.Password,
+		DisplayName: dept.DisplayName,
+		ParentsId:   dept.ParentsId,
+		TenantId:    loginUserObj.TenantId,
+		IsOU:        1,
+		Role:        model.RoleTenantAdmin,
+	}
+
+	if err := cleanUser.Insert(0); err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed: users.username") {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "此部门账号已注册, 请修改",
+			})
+		} else {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+		}
 		return
 	}
 
@@ -613,7 +980,7 @@ func ManageUser(c *gin.Context) {
 		return
 	}
 	myRole := c.GetInt("role")
-	if myRole <= user.Role && myRole != model.RoleRootUser {
+	if myRole <= user.Role && myRole != model.RoleSystemRootUser {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": "无权更新同权限等级或更高权限等级的用户信息",
@@ -623,7 +990,7 @@ func ManageUser(c *gin.Context) {
 	switch req.Action {
 	case "disable":
 		user.Status = model.UserStatusDisabled
-		if user.Role == model.RoleRootUser {
+		if user.Role == model.RoleSystemRootUser {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "无法禁用超级管理员用户",
@@ -633,7 +1000,7 @@ func ManageUser(c *gin.Context) {
 	case "enable":
 		user.Status = model.UserStatusEnabled
 	case "delete":
-		if user.Role == model.RoleRootUser {
+		if user.Role == model.RoleSystemRootUser {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "无法删除超级管理员用户",
@@ -648,37 +1015,37 @@ func ManageUser(c *gin.Context) {
 			return
 		}
 	case "promote":
-		if myRole != model.RoleRootUser {
+		if myRole != model.RoleSystemRootUser {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "普通管理员用户无法提升其他用户为管理员",
 			})
 			return
 		}
-		if user.Role >= model.RoleAdminUser {
+		if user.Role >= model.RoleSystemAdminUser {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "该用户已经是管理员",
 			})
 			return
 		}
-		user.Role = model.RoleAdminUser
+		user.Role = model.RoleSystemAdminUser
 	case "demote":
-		if user.Role == model.RoleRootUser {
+		if user.Role == model.RoleSystemRootUser {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "无法降级超级管理员用户",
 			})
 			return
 		}
-		if user.Role == model.RoleCommonUser {
+		if user.Role == model.RoleTenantUser {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "该用户已经是普通用户",
 			})
 			return
 		}
-		user.Role = model.RoleCommonUser
+		user.Role = model.RoleTenantUser
 	}
 
 	if err := user.Update(false); err != nil {
@@ -732,7 +1099,7 @@ func EmailBind(c *gin.Context) {
 		})
 		return
 	}
-	if user.Role == model.RoleRootUser {
+	if user.Role == model.RoleSystemRootUser {
 		config.RootUserEmail = email
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -806,4 +1173,282 @@ func AdminTopUp(c *gin.Context) {
 		"message": "",
 	})
 	return
+}
+
+func GetOrganizationTree(c *gin.Context) {
+	//db := c.MustGet("db").(*gorm.DB)
+	//userID := c.MustGet("userID").(uint)
+	//userRole := c.MustGet("userRole").(string)
+
+	loginUser, exists := c.Get("loginUser")
+	if !exists {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "此接口必须登录"})
+		return
+	}
+	// 将 loginUser 转换为你需要的类型
+	loginUserObj := loginUser.(*model.User)
+
+	tenantIdStr := c.Query("tenantId")
+
+	_tenantId := loginUserObj.TenantId
+	if tenantIdStr == "" {
+
+	} else {
+		tenantId, _ := strconv.Atoi(tenantIdStr)
+		if loginUserObj.IsOnProm != 1 {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无权使用此接口"})
+			return
+		}
+		_tenantId = tenantId
+	}
+
+	var users []model.User
+	//model.DB.Find(&units)
+
+	model.DB.Where("tenant_id = ?", _tenantId).Find(&users)
+
+	// 创建一个 UnitDTO 切片，用于存储转换后的数据
+	unitDTOs := make([]model.UnitDTO, len(users))
+	// 遍历 users 切片并转换每个 User 为 UnitDTO
+	for i, user := range users {
+		unitDTOs[i] = model.ToUnitDTO(&user)
+	}
+
+	var tree []model.UnitDTO
+
+	if loginUserObj.TenantId == loginUserObj.Id {
+		// 租户顶级账号返回完整树
+		tree = model.BuildTree(unitDTOs, 0)
+	} else {
+		// 普通用户返回自己所在分支和下级完整树
+		var userUnit model.UnitDTO
+		model.DB.First(&userUnit, loginUserObj.Id)
+
+		var branch []model.UnitDTO
+		currentID := userUnit.Id
+		for currentID != 0 {
+			var unit model.UnitDTO
+			model.DB.First(&unit, currentID)
+			branch = append([]model.UnitDTO{unit}, branch...)
+			currentID = unit.ParentsId
+		}
+
+		subTree := model.BuildTree(unitDTOs, userUnit.Id)
+		tree = append(branch, subTree...)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    tree,
+	})
+}
+
+type wecomCorpInfoRequest struct {
+	CorpId     string `json:"corpId"`
+	CorpSecret string `json:"corpSecret"`
+}
+
+func SaveWecomCorpInfo(c *gin.Context) {
+	loginUser, exists := c.Get("loginUser")
+	if !exists {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "此接口必须登录"})
+		return
+	}
+	// 将 loginUser 转换为你需要的类型
+	loginUserObj := loginUser.(*model.User)
+
+	req := wecomCorpInfoRequest{}
+	err := c.ShouldBindJSON(&req)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	_ = loginUserObj.UpdateCorpIdAndSecret(req.CorpId, req.CorpSecret)
+	at, expireTimestamp, _ := model.GetAccessToken(req.CorpId, req.CorpSecret)
+	_ = loginUserObj.UpdateAccessToken(at, expireTimestamp)
+
+	//err = model.Save(req.UserId, int64(req.Quota))
+	//if err != nil {
+	//	c.JSON(http.StatusOK, gin.H{
+	//		"success": false,
+	//		"message": err.Error(),
+	//	})
+	//	return
+	//}
+	//if req.Remark == "" {
+	//	req.Remark = fmt.Sprintf("通过 API 充值 %s", common.LogQuota(int64(req.Quota)))
+	//}
+	//model.RecordTopupLog(req.UserId, req.Remark, req.Quota)
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data": gin.H{
+			"accessToken":       at,
+			"accessTokenExpire": expireTimestamp,
+		},
+	})
+	return
+}
+
+func GetDept(c *gin.Context) {
+	loginUser, exists := c.Get("loginUser")
+	if !exists {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "此接口必须登录"})
+		return
+	}
+	// 将 loginUser 转换为你需要的类型
+	loginUserObj := loginUser.(*model.User)
+
+	idStr := c.Query("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "Invalid id"})
+		return
+	}
+
+	fmt.Print("id: ", id, "\n")
+
+	dept, err := model.GetTenantDeptById(loginUserObj.TenantId, id, false)
+
+	//id := c.Param("id")
+	//if err != nil {
+	//	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	//	return
+	//}
+	//
+
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	fmt.Print("dept.IsOU: ", dept.IsOU, "; dept.Id: ", dept.Id, "; dept.ParentsId: ", dept.TenantId, "\n")
+
+	if dept.Id == dept.TenantId {
+		// 租户顶级用户
+	} else if dept.IsOU == 1 {
+		// 部门标签
+	} else {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无法获取部门",
+		})
+		return
+	}
+
+	_deptDTO, _err := model.GetDeptWithChildren(dept)
+
+	if _err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"error":   _err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    _deptDTO,
+	})
+
+	return
+}
+
+func TransferQuota(c *gin.Context) {
+	var err error
+
+	var request struct {
+		FromUserID  int   `json:"from_user_id"`
+		ToUserID    int   `json:"to_user_id"`
+		QuotaAmount int64 `json:"quota_amount"`
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	//
+	//maxRetries := 5
+	//for i := 0; i < maxRetries; i++ {
+	err = model.DB.Transaction(func(tx *gorm.DB) error {
+		var fromUser, toUser model.User
+
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&fromUser, request.FromUserID).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&toUser, request.ToUserID).Error; err != nil {
+			return err
+		}
+
+		// 检查 FromUser 是否存在
+		if err := tx.First(&fromUser, request.FromUserID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("FromUser with ID %d not found", request.FromUserID)
+			}
+			return fmt.Errorf("failed to query FromUser: %w", err)
+		}
+
+		// 检查 ToUser 是否存在
+		if err := tx.First(&toUser, request.ToUserID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("ToUser with ID %d not found", request.ToUserID)
+			}
+			return fmt.Errorf("failed to query ToUser: %w", err)
+		}
+
+		//if fromUser.Quota < request.QuotaAmount {
+		//	return fmt.Errorf("insufficient quota")
+		//}
+		//
+		//if fromUser.Quota-request.QuotaAmount < fromUser.UsedQuota {
+		//	return fmt.Errorf("cannot transfer quota below used quota")
+		//}
+
+		//currentTime := time.Now()
+
+		// 更新时检查时间戳
+		fmt.Print("request.FromUserID", request.FromUserID, "request.ToUserID", request.ToUserID, "request.QuotaAmount", request.QuotaAmount, "\n")
+
+		//if err := tx.Model(&model.User{}).Where("id = ?", request.FromUserID, fromUser.UpdatedAt).Updates(map[string]interface{}{
+		if err0 := tx.Model(&model.User{}).Where("id = ?", request.FromUserID).Updates(map[string]interface{}{
+			"quota": gorm.Expr("quota - ?", request.QuotaAmount),
+			//"updated_at": currentTime,
+		}).Error; err0 != nil {
+			return err0
+		}
+
+		if err1 := tx.Model(&model.User{}).Where("id = ?", request.ToUserID).Updates(map[string]interface{}{
+			"quota": gorm.Expr("quota + ?", request.QuotaAmount),
+			//"updated_at": currentTime,
+		}).Error; err1 != nil {
+			return err1
+		}
+
+		return nil
+	})
+
+	//if err == nil {
+	//	break
+	//}
+
+	// 简单重试机制
+	//time.Sleep(time.Millisecond * 100)
+	//}
+
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
 }

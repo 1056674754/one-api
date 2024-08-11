@@ -133,7 +133,7 @@ func GitHubOAuth(c *gin.Context) {
 				user.DisplayName = "GitHub User"
 			}
 			user.Email = githubUser.Email
-			user.Role = model.RoleCommonUser
+			user.Role = model.RoleTenantUser
 			user.Status = model.UserStatusEnabled
 
 			if err := user.Insert(0); err != nil {

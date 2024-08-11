@@ -30,23 +30,39 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/oauth/email/bind", middleware.CriticalRateLimit(), middleware.UserAuth(), controller.EmailBind)
 		apiRouter.POST("/topup", middleware.AdminAuth(), controller.AdminTopUp)
 
+		apiRouter.POST("/tenant", middleware.CriticalRateLimit(), controller.TenantGet)
+
 		userRoute := apiRouter.Group("/user")
 		{
 			userRoute.POST("/register", middleware.CriticalRateLimit(), middleware.TurnstileCheck(), controller.Register)
 			userRoute.POST("/login", middleware.CriticalRateLimit(), controller.Login)
+			userRoute.POST("/tenant/login", middleware.CriticalRateLimit(), controller.TenantUserLogin)
+			//userRoute.POST("/tenant", middleware.CriticalRateLimit(), controller.TenantGet)
 			userRoute.GET("/logout", controller.Logout)
 
 			selfRoute := userRoute.Group("/")
 			selfRoute.Use(middleware.UserAuth())
 			{
+				selfRoute.GET("/ou-tree", controller.GetOrganizationTree)
+
 				selfRoute.GET("/dashboard", controller.GetUserDashboard)
 				selfRoute.GET("/self", controller.GetSelf)
 				selfRoute.PUT("/self", controller.UpdateSelf)
 				selfRoute.DELETE("/self", controller.DeleteSelf)
 				selfRoute.GET("/token", controller.GenerateAccessToken)
+				selfRoute.POST("/tenant/wecom-corp-info", controller.SaveWecomCorpInfo)
+
 				selfRoute.GET("/aff", controller.GetAffCode)
 				selfRoute.POST("/topup", controller.TopUp)
 				selfRoute.GET("/available_models", controller.GetUserAvailableModels)
+
+				//selfRoute.GET("/tenant-user/:id", controller.GetTenantUser)
+				selfRoute.POST("/tenant-user", controller.CreateTenantUser)
+				selfRoute.POST("/dept", controller.CreateDept)
+				selfRoute.GET("/dept", controller.GetDept)
+
+				selfRoute.POST("/transfer-quota", controller.TransferQuota)
+
 			}
 
 			adminRoute := userRoute.Group("/")

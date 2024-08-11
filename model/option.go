@@ -52,6 +52,7 @@ func InitOptionMap() {
 	config.OptionMap["SystemName"] = config.SystemName
 	config.OptionMap["Logo"] = config.Logo
 	config.OptionMap["ServerAddress"] = ""
+	config.OptionMap["BaseDomain"] = ""
 	config.OptionMap["GitHubClientId"] = ""
 	config.OptionMap["GitHubClientSecret"] = ""
 	config.OptionMap["WeChatServerAddress"] = ""
@@ -168,6 +169,8 @@ func updateOptionMap(key string, value string) (err error) {
 		config.SMTPToken = value
 	case "ServerAddress":
 		config.ServerAddress = value
+	case "BaseDomain":
+		config.BaseDomain = value
 	case "GitHubClientId":
 		config.GitHubClientId = value
 	case "GitHubClientSecret":

@@ -10,12 +10,20 @@ import (
 	"github.com/songquanpeng/one-api/common/config"
 	"github.com/songquanpeng/one-api/controller"
 	"github.com/songquanpeng/one-api/middleware"
+	"log"
 	"net/http"
 	"strings"
 )
 
 func SetWebRouter(router *gin.Engine, buildFS embed.FS) {
-	indexPageData, _ := buildFS.ReadFile(fmt.Sprintf("web/build/%s/index.html", config.Theme))
+	indexPageData, err := buildFS.ReadFile(fmt.Sprintf("web/build/%s/index.html", config.Theme))
+	if err != nil {
+		log.Fatalf("Failed to read index.html: %v", err)
+	}
+	if len(indexPageData) == 0 {
+		log.Fatalf("index.html is empty")
+	}
+
 	router.Use(gzip.Gzip(gzip.DefaultCompression))
 	router.Use(middleware.GlobalWebRateLimit())
 	router.Use(middleware.Cache())

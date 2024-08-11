@@ -84,7 +84,7 @@ func WeChatAuth(c *gin.Context) {
 		if config.RegisterEnabled {
 			user.Username = "wechat_" + strconv.Itoa(model.GetMaxUserId()+1)
 			user.DisplayName = "WeChat User"
-			user.Role = model.RoleCommonUser
+			user.Role = model.RoleTenantUser
 			user.Status = model.UserStatusEnabled
 
 			if err := user.Insert(0); err != nil {
