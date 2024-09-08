@@ -18,8 +18,8 @@ var Footer = ""
 var Logo = ""
 var TopUpLink = ""
 var ChatLink = ""
-var QuotaPerUnit = 500 * 1000.0     // $0.002 / 1K tokens
-var QuotaPerUnitRMB = 7500 * 1000.0 // RMB0.03 / 1K tokens
+var QuotaPerUnit = 500 * 1000.0         // $0.002 / 1K tokens
+var QuotaPerUnitRMB = 500 * 1000.0 / 15 // RMB0.03 / 1K tokens
 var DisplayInCurrencyEnabled = true
 var DisplayTokenStatEnabled = true
 

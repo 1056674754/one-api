@@ -277,7 +277,7 @@ func (user *User) Insert(inviterId int) error {
 	//DB.Model(&user).Update("TenantId", user.Id)
 
 	// 更新 TenantId
-	if user.TenantId == 0 && user.IsOnProm == 0 {
+	if user.TenantId <= 0 && user.IsOnProm == 0 {
 		if result := tx.Model(user).Update("TenantId", user.Id); result.Error != nil {
 			// 如果更新失败，回滚事务
 			tx.Rollback()
@@ -814,7 +814,7 @@ func GetDeptWithChildren(dept *User) (*UnitDTO, error) {
 
 func FetchChildren(user *User) error {
 	var children []User
-	if err := DB.Where("parents_id = ?", user.Id).Find(&children).Error; err != nil {
+	if err := DB.Where("parents_id = ? and status != 3", user.Id).Find(&children).Error; err != nil {
 		return err
 	}
 

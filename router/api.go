@@ -57,7 +57,9 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.GET("/available_models", controller.GetUserAvailableModels)
 
 				//selfRoute.GET("/tenant-user/:id", controller.GetTenantUser)
+				selfRoute.POST("/tenant-user/manage", controller.ManageTenantUser)
 				selfRoute.POST("/tenant-user", controller.CreateTenantUser)
+				selfRoute.PUT("/tenant-user", controller.UpdateTenantUser)
 				selfRoute.POST("/dept", controller.CreateDept)
 				selfRoute.GET("/dept", controller.GetDept)
 

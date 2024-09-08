@@ -600,6 +600,70 @@ func UpdateUser(c *gin.Context) {
 	return
 }
 
+func UpdateTenantUser(c *gin.Context) {
+	var updatedUser model.User
+	err := json.NewDecoder(c.Request.Body).Decode(&updatedUser)
+	if err != nil || updatedUser.Id == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无效的参数",
+		})
+		return
+	}
+	if updatedUser.Password == "" {
+		updatedUser.Password = "$I_LOVE_U" // make Validator happy :)
+	}
+	if err := common.Validate.Struct(&updatedUser); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "输入不合法 " + err.Error(),
+		})
+		return
+	}
+	originUser, err := model.GetUserById(updatedUser.Id, false)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+	myRole := c.GetInt(ctxkey.Role)
+	if myRole <= originUser.Role && myRole != model.RoleSystemRootUser {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无权更新同权限等级或更高权限等级的用户信息",
+		})
+		return
+	}
+	if myRole <= updatedUser.Role && myRole != model.RoleSystemRootUser {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无权将其他用户权限等级提升到大于等于自己的权限等级",
+		})
+		return
+	}
+	if updatedUser.Password == "$I_LOVE_U" {
+		updatedUser.Password = "" // rollback to what it should be
+	}
+	updatePassword := updatedUser.Password != ""
+	if err := updatedUser.Update(updatePassword); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+	//if originUser.Quota != updatedUser.Quota {
+	//	model.RecordLog(originUser.Id, model.LogTypeManage, fmt.Sprintf("管理员将用户额度从 %s修改为 %s", common.LogQuota(originUser.Quota), common.LogQuota(updatedUser.Quota)))
+	//}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+	})
+	return
+}
+
 func UpdateSelf(c *gin.Context) {
 	var user model.User
 	err := json.NewDecoder(c.Request.Body).Decode(&user)
@@ -1067,6 +1131,197 @@ func ManageUser(c *gin.Context) {
 	return
 }
 
+type ManageTenantUserRequest struct {
+	Id     int    `json:"id"`
+	Action string `json:"action"`
+}
+
+func ManageTenantUser(c *gin.Context) {
+	var req ManageTenantUserRequest
+	err := json.NewDecoder(c.Request.Body).Decode(&req)
+
+	myRole := c.GetInt("role")
+	myTenantId := c.GetInt("tenantId")
+
+	fmt.Println("myRole", myRole, "myTenantId", myTenantId)
+
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无效的参数",
+		})
+		return
+	}
+	user := model.User{
+		Id:       req.Id,
+		TenantId: myTenantId,
+	}
+	// 打印查询条件
+	fmt.Printf("Querying user with Id: %d and TenantId: %d\n", user.Id, user.TenantId)
+
+	// 执行查询
+	result := model.DB.Where(&user).First(&user)
+
+	// 检查查询结果
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			log.Printf("User not found: Id=%d, TenantId=%d\n", user.Id, user.TenantId)
+		} else {
+			log.Printf("Error querying user: %v\n", result.Error)
+		}
+	} else {
+		// 打印查询结果
+		fmt.Printf("User found: %+v\n", user)
+	}
+
+	if user.Id == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "租户用户不存在",
+		})
+		return
+	}
+	fmt.Println("myRole", myRole, "user.Role", user.Role, "myRole <= user.Role", myRole <= user.Role, "myTenantId", myTenantId)
+
+	if myRole <= user.Role && myRole <= model.RoleTenantSuperAdmin {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": "无权更新同权限等级或更高权限等级的用户信息",
+		})
+		return
+	}
+	switch req.Action {
+	case "disable":
+		user.Status = model.UserStatusDisabled
+		if user.Role == model.RoleSystemRootUser {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "无法禁用超级管理员用户",
+			})
+			return
+		}
+	case "enable":
+		user.Status = model.UserStatusEnabled
+	case "delete":
+		if user.Role == model.RoleSystemRootUser {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "无法删除超级管理员用户",
+			})
+			return
+		}
+
+		if user.Quota > 30000 {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "Account have too much quota, Please remove them before delete!!!",
+			})
+			return
+		}
+
+		if user.IsOU != 0 {
+			deptDTO, _ := model.GetDeptWithChildren(&user)
+			if len(deptDTO.Children) > 0 {
+				c.JSON(http.StatusOK, gin.H{
+					"success": false,
+					"message": "Please delete children first!!!",
+				})
+				return
+
+			}
+
+		}
+		if err := user.Delete(); err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+	case "promote":
+		if myRole < model.RoleTenantSuperAdmin {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "普通管理员用户无法提升其他用户",
+			})
+			return
+		}
+		if user.Role >= model.RoleTenantAdmin {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "该用户已经是管理员",
+			})
+			return
+		}
+
+		//else if user.Role == model.RoleTenantAdmin {
+		//	user.Role = model.RoleTenantSuperAdmin
+		//}
+		if user.Role == model.RoleTenantUser {
+			user.Role = model.RoleTenantAdmin
+		} else {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "无法继续提升租户用户权限",
+			})
+			return
+		}
+	case "demote":
+		if myRole < model.RoleTenantSuperAdmin {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "普通管理员用户无法降低其他用户",
+			})
+			return
+		}
+		if user.Role >= model.RoleTenantSuperAdmin {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "无法降级租户管理员及以上用户",
+			})
+			return
+		}
+		if user.Role == model.RoleTenantUser {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "该用户已经是普通用户",
+			})
+			return
+		}
+
+		if user.Role == model.RoleTenantSuperAdmin {
+			user.Role = model.RoleTenantAdmin
+
+		} else if user.Role == model.RoleTenantAdmin {
+			user.Role = model.RoleTenantUser
+		} else {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "无法继续降低租户用户权限",
+			})
+			return
+		}
+	}
+
+	if err := user.Update(false); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+	clearUser := model.User{
+		Role:   user.Role,
+		Status: user.Status,
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    clearUser,
+	})
+	return
+}
+
 func EmailBind(c *gin.Context) {
 	email := c.Query("email")
 	code := c.Query("code")
@@ -1190,7 +1445,7 @@ func GetOrganizationTree(c *gin.Context) {
 
 	tenantIdStr := c.Query("tenantId")
 
-	_tenantId := loginUserObj.TenantId
+	myTenantId := loginUserObj.TenantId
 	if tenantIdStr == "" {
 
 	} else {
@@ -1199,13 +1454,13 @@ func GetOrganizationTree(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"success": false, "message": "无权使用此接口"})
 			return
 		}
-		_tenantId = tenantId
+		myTenantId = tenantId
 	}
 
 	var users []model.User
 	//model.DB.Find(&units)
 
-	model.DB.Where("tenant_id = ?", _tenantId).Find(&users)
+	model.DB.Where("tenant_id = ? and status != 3", myTenantId).Find(&users)
 
 	// 创建一个 UnitDTO 切片，用于存储转换后的数据
 	unitDTOs := make([]model.UnitDTO, len(users))
@@ -1219,22 +1474,71 @@ func GetOrganizationTree(c *gin.Context) {
 	if loginUserObj.TenantId == loginUserObj.Id {
 		// 租户顶级账号返回完整树
 		tree = model.BuildTree(unitDTOs, 0)
+		//tree = model.BuildTree(unitDTOs, loginUserObj.TenantId)
 	} else {
-		// 普通用户返回自己所在分支和下级完整树
-		var userUnit model.UnitDTO
-		model.DB.First(&userUnit, loginUserObj.Id)
+		//// 普通用户返回自己所在分支和下级完整树
+		//var userUnit model.UnitDTO
+		//model.DB.First(&userUnit, loginUserObj.Id)
+		//
+		//var branch []model.UnitDTO
+		//currentID := userUnit.Id
+		//for currentID != 0 {
+		//	var unit model.UnitDTO
+		//	model.DB.First(&unit, currentID)
+		//	branch = append([]model.UnitDTO{unit}, branch...)
+		//	currentID = unit.ParentsId
+		//}
+		//
+		//subTree := model.BuildTree(unitDTOs, userUnit.Id)
+		//tree = append(branch, subTree...)
 
-		var branch []model.UnitDTO
-		currentID := userUnit.Id
-		for currentID != 0 {
-			var unit model.UnitDTO
-			model.DB.First(&unit, currentID)
-			branch = append([]model.UnitDTO{unit}, branch...)
-			currentID = unit.ParentsId
+		//subTree := model.BuildTree(unitDTOs, userUnit.Id)
+		//tree = append(branch, subTree...)
+
+		var unit model.User
+		model.DB.First(&unit, loginUserObj.ParentsId)
+
+		fmt.Println("OUTree.ParentsId", unit.ParentsId)
+		fmt.Println("loginUserObj.ParentsId", loginUserObj.ParentsId)
+		tree = model.BuildTree(unitDTOs, unit.ParentsId)
+		if len(tree) > 0 {
+			//tree =
+			idToFind := loginUserObj.ParentsId
+			var foundNode *model.UnitDTO
+
+			// Anonymous recursive function to find the node by ID
+			var findNode func(node *model.UnitDTO, id int) *model.UnitDTO
+			findNode = func(node *model.UnitDTO, id int) *model.UnitDTO {
+				if node.Id == id {
+					return node
+				}
+				for _, child := range node.Children {
+					if found := findNode(&child, id); found != nil {
+						return found
+					}
+				}
+				return nil
+			}
+
+			// Iterate through the tree and use the anonymous function
+			for _, node := range tree {
+				if foundNode = findNode(&node, idToFind); foundNode != nil {
+					break
+				}
+			}
+
+			if foundNode != nil {
+				fmt.Printf("Node found: %+v\n", foundNode)
+
+				tree = []model.UnitDTO{*foundNode}
+			} else {
+				fmt.Println("Node not found")
+				tree = []model.UnitDTO{}
+			}
+
 		}
+		//tree = model.BuildTree(unitDTOs, loginUserObj.ParentsId)
 
-		subTree := model.BuildTree(unitDTOs, userUnit.Id)
-		tree = append(branch, subTree...)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
